@@ -8,15 +8,14 @@ import (
 	"strings"
 )
 
-var rawExtensions = []string{".raw", ".dng", ".raf", ".cr2", ".nef", ".arw"}
-var jpgExtensions = []string{".jpg", ".jpeg"}
-
 var printFlag bool
 var confirmFlag bool
+var sourceFormatFlag string
+var imageFormatFlag string
 
 // rmRawCmd represents the rmRaw command
 var rmRawCmd = &cobra.Command{
-	Use:   "rm-raw [path-to-folder]",
+	Use:   "rm-raw [path-to-folder] [OPTIONS]",
 	Short: "Remove raw files if the corresponding jpg file exists",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if err := cobra.ExactArgs(1)(cmd, args); err != nil {
@@ -31,7 +30,17 @@ var rmRawCmd = &cobra.Command{
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		countRaw, candidates := findRaw(args[0])
+		var sourceFormats []string
+		for _, rawFormat := range strings.Split(sourceFormatFlag, ",") {
+			sourceFormats = append(sourceFormats, strings.TrimSpace(rawFormat))
+		}
+
+		var imageFormats []string
+		for _, imageFormat := range strings.Split(imageFormatFlag, ",") {
+			imageFormats = append(imageFormats, strings.TrimSpace(imageFormat))
+		}
+
+		countRaw, candidates := FindSourceIfImageExists(args[0], sourceFormats, imageFormats)
 		fmt.Printf("Found %d raw files.\n", countRaw)
 
 		if len(candidates) > 0 && (confirmFlag || printFlag) {
@@ -65,11 +74,14 @@ var rmRawCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(rmRawCmd)
 
+	rmRawCmd.Flags().StringVarP(&sourceFormatFlag, "source-format", "s", ".raw, .dng, .raf, .cr2, .nef, .arw", "Specify the source format to look for")
+	rmRawCmd.Flags().StringVarP(&imageFormatFlag, "image-format", "i", ".jpg, .jpeg", "Specify the image format to look for")
+
 	rmRawCmd.Flags().BoolVarP(&printFlag, "print", "p", false, "Print the files to be deleted")
 	rmRawCmd.Flags().BoolVarP(&confirmFlag, "confirm", "c", false, "Delete the found files")
 }
 
-func findRaw(path string) (int, []string) {
+func FindSourceIfImageExists(path string, sourceFormats []string, imageFormats []string) (int, []string) {
 	countRaw := 0
 	candidates := make([]string, 0)
 	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
@@ -77,14 +89,14 @@ func findRaw(path string) (int, []string) {
 			return err
 		}
 
-		if contains(rawExtensions, strings.ToLower(filepath.Ext(info.Name()))) {
+		if contains(sourceFormats, strings.ToLower(filepath.Ext(info.Name()))) {
 			countRaw++
 
-			jpg, err := lookupForJpg(path)
+			image, err := lookupImage(path, imageFormats)
 			if err != nil {
 				fmt.Printf("error reading %s: %s\n", info.Name(), err.Error())
 			}
-			if jpg != nil {
+			if image != nil {
 				candidates = append(candidates, path)
 			}
 		}
@@ -99,7 +111,7 @@ func findRaw(path string) (int, []string) {
 	return countRaw, candidates
 }
 
-func lookupForJpg(prefix string) (*string, error) {
+func lookupImage(prefix string, imageFormats []string) (*string, error) {
 	paths, err := filepath.Glob(strings.TrimSuffix(prefix, filepath.Ext(prefix)) + ".*")
 	if err != nil {
 		return nil, err
@@ -107,7 +119,7 @@ func lookupForJpg(prefix string) (*string, error) {
 	if len(paths) > 1 {
 		for _, path := range paths {
 			fileName := filepath.Base(path)
-			if contains(jpgExtensions, strings.ToLower(filepath.Ext(fileName))) {
+			if contains(imageFormats, strings.ToLower(filepath.Ext(fileName))) {
 				return &fileName, nil
 			}
 		}
